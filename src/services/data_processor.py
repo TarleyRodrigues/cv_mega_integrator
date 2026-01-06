@@ -79,38 +79,50 @@ class DataProcessor:
                 rule = config.get("rule")
 
                 if source_col in df.columns:
+                    # Filtra apenas o que não é nulo e não é vazio
                     mask = df[source_col].notnull() & (df[source_col] != "")
-                    # Extrai números de "301A" -> "301"
+
+                    # Extrai apenas os dígitos (301A -> 301)
                     series = df.loc[mask, source_col].astype(
                         str).str.extract(r'(\d+)')[0].fillna("")
 
                     if rule == "slice_andar":
+                        # Se len > 2 (ex: 301), tira os dois últimos e sobra o andar
                         df.loc[mask, col_name] = series.apply(
-                            lambda x: float(
-                                x[:-2]) if len(x) > 2 else float(x if x else 0)
+                            lambda x: int(
+                                x[:-2]) if len(x) > 2 else (int(x) if x else 0)
                         )
                     elif rule == "slice_coluna":
+                        # Pega apenas os dois últimos
                         df.loc[mask, col_name] = series.apply(
-                            lambda x: float(
-                                x[-2:]) if len(x) >= 2 else float(x if x else 0)
+                            lambda x: int(
+                                x[-2:]) if len(x) >= 2 else (int(x) if x else 0)
                         )
+
+                    # FORÇA O TIPO INTEIRO (Nullable)
+                    df[col_name] = df[col_name].astype('Int64')
+
         return df
 
     def save_to_csv(self, df: pd.DataFrame, output_path: str):
         """
-        Exportação Final: Decimal como VÍRGULA e sem separador de milhar.
+        Exportação Final Inteligente:
+        Inteiros ficam como inteiros (3), Floats ficam com vírgula e 4 casas (103,2200).
         """
-        # Criamos uma cópia para não formatar o DF original
         export_df = df.copy()
 
-        # Garante que colunas numéricas não tenham .00000000001 (resíduos de float)
-        # e formata para o CSV com vírgula usando os parâmetros do to_csv
+        # Antes de exportar, colunas que são Int64 e não tem nulos podem ser
+        # convertidas para string para garantir que o float_format não as afete
+        for col in export_df.columns:
+            if str(export_df[col].dtype) == 'Int64':
+                # Converte para string removendo o .0 caso o Pandas tente forçar
+                export_df[col] = export_df[col].astype(str).replace('<NA>', '')
+
         export_df.to_csv(
             output_path,
             index=False,
             sep=self.settings.get("csv_delimiter", ";"),
             encoding=self.settings.get("encoding_target", "utf-8-sig"),
-            decimal=',',         # <--- AQUI: Transforma 103.22 em 103,22
-            # <--- Mantém 4 casas decimais fixas (sem notação científica)
-            float_format='%.4f'
+            decimal=',',
+            float_format='%.4f'  # Isso agora só afetará as Áreas e Fração Ideal
         )
