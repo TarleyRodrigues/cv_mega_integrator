@@ -1,7 +1,7 @@
-# src/services/data_processor.py
-
+# path/to/src/services/data_processor.py
 import pandas as pd
 import numpy as np
+import re
 
 
 class DataProcessor:
@@ -11,14 +11,13 @@ class DataProcessor:
         self.settings = mapping.get("settings", {})
 
     def process(self, mega_df: pd.DataFrame, manual_inputs: dict) -> pd.DataFrame:
-        """
-        Executa a transformação central: Mega ERP -> CV CRM Layout.
-        """
-        # 1. Inicializa o DataFrame de destino com as colunas do mapping
         target_cols = list(self.columns_config.keys())
         cv_df = pd.DataFrame(columns=target_cols, index=range(len(mega_df)))
 
-        # 2. Processamento por tipo de origem
+        # Keywords para identificar colunas numéricas no destino
+        numeric_keywords = ['Área', 'Fração',
+                            'Valor', 'Vagas', 'm²', 'Andar', 'Coluna']
+
         for col_name, config in self.columns_config.items():
             origin = config.get("origin")
 
@@ -29,68 +28,89 @@ class DataProcessor:
             elif origin == "mega":
                 mega_col = config.get("mega_column")
                 if mega_col in mega_df.columns:
-                    cv_df[col_name] = self._clean_mega_data(mega_df[mega_col])
+                    is_num_field = any(
+                        kw in col_name for kw in numeric_keywords)
+                    if is_num_field:
+                        cv_df[col_name] = self._handle_numeric(
+                            mega_df[mega_col])
+                    else:
+                        cv_df[col_name] = self._handle_text(mega_df[mega_col])
                 else:
                     cv_df[col_name] = config.get("default")
 
             elif origin == "empty":
                 cv_df[col_name] = config.get("default")
 
-        # 3. Processamento de Camada Lógica (Andar e Coluna)
-        # Deve ser feito APÓS o preenchimento das colunas 'mega' pois depende do 'Nome (Unidade)'
+        # Aplica Andar e Coluna baseando-se no Nome (Unidade) já limpo
         cv_df = self._apply_logical_rules(cv_df)
-
         return cv_df
 
-    def _clean_mega_data(self, series: pd.Series) -> pd.Series:
-        """
-        Trata tipagem: converte decimais brasileiros (,) para padrão system (.) 
-        e limpa espaços em branco.
-        """
-        series = series.astype(str).str.strip()
+    def _handle_text(self, series: pd.Series) -> pd.Series:
+        """Mantém o texto original (ex: 301A) sem conversões."""
+        return series.astype(str).str.strip().replace('nan', '')
 
-        # Se for uma coluna numérica vinda do MEGA (contém vírgula como decimal)
-        # Substitui vírgula por ponto apenas onde faz sentido para conversão posterior
-        if self.settings.get("decimal_sep_source") == ",":
-            # Regex básica para identificar se a string parece um número decimal BR
-            # Remove separador de milhar se houver
-            series = series.str.replace('.', '', regex=False)
-            series = series.str.replace(',', '.', regex=False)
+    def _handle_numeric(self, series: pd.Series) -> pd.Series:
+        """Converte para float internamente para cálculos e limpeza."""
+        def clean_val(val):
+            if pd.isna(val) or val == "":
+                return 0.0
+            if isinstance(val, (int, float)):
+                return float(val)
 
-        return series
+            val_str = str(val).strip()
+            # Se vier do MEGA como "1.250,50" -> 1250.50
+            if "." in val_str and "," in val_str:
+                val_str = val_str.replace(".", "").replace(",", ".")
+            # Se vier como "12,00" -> 12.00
+            elif "," in val_str:
+                val_str = val_str.replace(",", ".")
+
+            try:
+                return float(val_str)
+            except:
+                return 0.0
+
+        return series.apply(clean_val)
 
     def _apply_logical_rules(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Aplica as regras de slicing de string baseadas no mapping.json.
-        """
         for col_name, config in self.columns_config.items():
             if config.get("origin") == "logical":
                 source_col = config.get("source_col")
                 rule = config.get("rule")
 
                 if source_col in df.columns:
-                    # Garantir que é string para o slice
-                    series = df[source_col].astype(str)
+                    mask = df[source_col].notnull() & (df[source_col] != "")
+                    # Extrai números de "301A" -> "301"
+                    series = df.loc[mask, source_col].astype(
+                        str).str.extract(r'(\d+)')[0].fillna("")
 
-                    if rule == "slice_0_2":
-                        # Ex: 0401A -> 04 -> 4
-                        df[col_name] = series.str[0:2].apply(
-                            lambda x: str(int(x)) if x.isdigit() else x)
-
-                    elif rule == "slice_2_4":
-                        # Ex: 0401A -> 01 -> 1
-                        df[col_name] = series.str[2:4].apply(
-                            lambda x: str(int(x)) if x.isdigit() else x)
-
+                    if rule == "slice_andar":
+                        df.loc[mask, col_name] = series.apply(
+                            lambda x: float(
+                                x[:-2]) if len(x) > 2 else float(x if x else 0)
+                        )
+                    elif rule == "slice_coluna":
+                        df.loc[mask, col_name] = series.apply(
+                            lambda x: float(
+                                x[-2:]) if len(x) >= 2 else float(x if x else 0)
+                        )
         return df
 
     def save_to_csv(self, df: pd.DataFrame, output_path: str):
         """
-        Exporta o resultado final seguindo os padrões do CV CRM.
+        Exportação Final: Decimal como VÍRGULA e sem separador de milhar.
         """
-        df.to_csv(
+        # Criamos uma cópia para não formatar o DF original
+        export_df = df.copy()
+
+        # Garante que colunas numéricas não tenham .00000000001 (resíduos de float)
+        # e formata para o CSV com vírgula usando os parâmetros do to_csv
+        export_df.to_csv(
             output_path,
             index=False,
             sep=self.settings.get("csv_delimiter", ";"),
-            encoding=self.settings.get("encoding_target", "utf-8")
+            encoding=self.settings.get("encoding_target", "utf-8-sig"),
+            decimal=',',         # <--- AQUI: Transforma 103.22 em 103,22
+            # <--- Mantém 4 casas decimais fixas (sem notação científica)
+            float_format='%.4f'
         )
