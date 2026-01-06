@@ -1,4 +1,3 @@
-// config/mapping.json
 {
     "project_info": {
         "target_system": "CV CRM",
@@ -24,7 +23,6 @@
         "Nome (Etapa)": { "origin": "manual", "mega_column": null, "default": null },
         "Nome (Bloco)": { "origin": "manual", "mega_column": null, "default": null },
         "Ativo no painel (Unidade)": { "origin": "manual", "mega_column": null, "default": "Sim" },
-
         "Nome (Unidade)": { "origin": "mega", "mega_column": "UNIDADE", "default": null },
         "Área privativa m² (Unidade)": { "origin": "mega", "mega_column": "APARTAMENTO", "default": "0" },
         "Área de garagem (Unidade)": { "origin": "mega", "mega_column": "ÁREA VAGA", "default": "0" },
@@ -32,10 +30,8 @@
         "Área privativa total (Unidade)": { "origin": "mega", "mega_column": "TOTAL APTO + VAGA + ESC", "default": "0" },
         "Área total (Unidade)": { "origin": "mega", "mega_column": "TOTAL GERAL", "default": "0" },
         "Fração ideal (Unidade)": { "origin": "mega", "mega_column": "FRAÇÃO IDEAL DECIMAL", "default": "0" },
-
         "Andar (Unidade)": { "origin": "logical", "source_col": "Nome (Unidade)", "rule": "slice_0_2" },
         "Coluna (Unidade)": { "origin": "logical", "source_col": "Nome (Unidade)", "rule": "slice_2_4" },
-
         "Situação Comercial (Empreendimento)": { "origin": "empty", "default": "" },
         "Situação da Obra (Empreendimento)": { "origin": "empty", "default": "" },
         "Logradouro (Empreendimento)": { "origin": "empty", "default": "" },
