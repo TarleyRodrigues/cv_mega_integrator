@@ -126,7 +126,7 @@
     "settings": {
         "decimal_sep_source": ",",
         "decimal_sep_target": ".",
-        "encoding_target": "utf-8",
+        "encoding_target": "utf-8-sig",
         "csv_delimiter": ";"
     }
 }
